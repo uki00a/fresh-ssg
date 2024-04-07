@@ -10,7 +10,7 @@ Deno.test("integration tests", async (t) => {
   const res = await new Deno.Command("deno", {
     args: ["task", "build"],
     stdout: "inherit",
-    stderr: "inherit"
+    stderr: "inherit",
   }).output();
   assert(res.success);
 
