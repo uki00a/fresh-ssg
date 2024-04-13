@@ -1,12 +1,8 @@
 import { basename, dirname, extname } from "node:path";
 import { isDynamicRoute } from "$fresh-ssg/_utils.ts";
 import type { Manifest } from "$fresh/server.ts";
-import {
-  cheerio,
-  generate as babelGenerate,
-  parser,
-  traverse,
-} from "./deps.ts";
+import { rewriteHTML } from "./_html_rewriter.ts";
+import { assert } from "./_assert.ts";
 
 export interface Storage {
   write(path: string, content: string): Promise<void>;
@@ -39,55 +35,10 @@ export async function generate(options: GenerateOptions) {
     );
     const response = await options.handler(request);
     const html = await response.text();
-    await options.storage.write(route.filePath, rewriteLinks(html));
+    await options.storage.write(route.filePath, rewriteHTML(html));
   }
+  // TODO: copy `static` and `_fresh/static`
 }
-
-/**
- * ```javascript
- * `/_frsh/js/${buildHash}/${script}.js`
- * ```
- */
-const kFreshJsLinkPath = "/_frsh/js/";
-function stripFreshJsPathPrefix(path: string): string {
-  assert(path.startsWith(kFreshJsLinkPath));
-  const pathWithHash = path.slice(kFreshJsLinkPath.length);
-  const endOfHash = pathWithHash.indexOf("/");
-  assert(endOfHash > -1);
-  return pathWithHash.slice(endOfHash);
-}
-
-export function rewriteLinks(html: string): string {
-  const $ = cheerio(html);
-  $("link").each((_, link) => {
-    const $link = $(link);
-    const href = $link.attr("href");
-    if (href?.startsWith(kFreshJsLinkPath)) {
-      $link.attr("href", stripFreshJsPathPrefix(href));
-    }
-  });
-  function transformScript(source: string): string {
-    const ast = parser.parse(source, { sourceType: "module" });
-    traverse(ast, {
-      // @ts-expect-error TODO: fix this type error
-      ImportDeclaration(path) {
-        const link = path.node.source.value;
-        if (link.startsWith(kFreshJsLinkPath)) {
-          path.node.source.value = stripFreshJsPathPrefix(link);
-        }
-      },
-    });
-    const { code } = babelGenerate(ast, {});
-    return code;
-  }
-  $("script[type=module]").each((_, script) => {
-    const $script = $(script);
-    const source = $script.text();
-    $script.text(transformScript(source));
-  });
-  return $.html();
-}
-
 function log(logger: Logger, level: keyof Logger, message: string): void {
   return logger[level](`[fresh-ssg] ${message}`);
 }
@@ -146,10 +97,4 @@ function collectRoutesFromManifest(manifest: Manifest): Array<Route> {
       isRenderable,
     };
   });
-}
-
-function assert(expr: boolean, message = "Assertion failed"): asserts expr {
-  if (!expr) {
-    throw new Error("[fresh-ssg] " + message);
-  }
 }
